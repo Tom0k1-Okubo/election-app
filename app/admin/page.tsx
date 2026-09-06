@@ -78,9 +78,12 @@ export default function AdminPage() {
     )
   }
 
-  function addRace() {
-    setRaceInputs((prev) => [...prev, { title: '', candidateNamesText: '' }])
-  }
+function addRace() {
+  setRaceInputs((prev) => [
+    ...prev,
+    { title: '', candidates: [{ name: '', bio: '' }, { name: '', bio: '' }] },
+  ])
+}
 
   function removeRace(index: number) {
     setRaceInputs((prev) => prev.filter((_, i) => i !== index))
