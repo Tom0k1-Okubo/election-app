@@ -2,17 +2,27 @@
 
 import { useState } from 'react'
 
-type Candidate = { id: string; name: string }
-type Result = { candidateId: string; name: string; count: number }
+type CandidateInput = { name: string; bio: string }
+type RaceInput = { title: string; candidates: CandidateInput[] }
+type RaceResult = {
+  raceId: string
+  raceTitle: string
+  candidates: { candidateId: string; name: string; count: number }[]
+}
 
 export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [title, setTitle] = useState('')
-  const [candidateNamesText, setCandidateNamesText] = useState('')
-  const [electionId, setElectionId] = useState('')
-  const [tokenCount, setTokenCount] = useState(5)
-  const [tokens, setTokens] = useState<string[]>([])
-  const [results, setResults] = useState<Result[] | null>(null)
+  const [raceInputs, setRaceInputs] = useState<RaceInput[]>([
+    { title: '', candidates: [{ name: '', bio: '' }, { name: '', bio: '' }] },
+    { title: '', candidates: [{ name: '', bio: '' }, { name: '', bio: '' }] },
+  ])
+  const [eventId, setEventId] = useState('')
+  const [voterNamesText, setVoterNamesText] = useState('')
+  const [issued, setIssued] = useState<{ name: string; token: string }[]>([])
+  const [results, setResults] = useState<{ eventTitle: string; races: RaceResult[] } | null>(
+    null
+  )
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -23,37 +33,99 @@ export default function AdminPage() {
     }
   }
 
-  async function handleCreateElection() {
+  function updateRace(index: number, field: keyof RaceInput, value: string) {
+    setRaceInputs((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
+    )
+  }
+    function updateCandidate(
+    raceIndex: number,
+    candidateIndex: number,
+    field: keyof CandidateInput,
+    value: string
+  ) {
+    setRaceInputs((prev) =>
+      prev.map((r, i) =>
+        i !== raceIndex
+          ? r
+          : {
+              ...r,
+              candidates: r.candidates.map((c, ci) =>
+                ci === candidateIndex ? { ...c, [field]: value } : c
+              ),
+            }
+      )
+    )
+  }
+
+  function addCandidate(raceIndex: number) {
+    setRaceInputs((prev) =>
+      prev.map((r, i) =>
+        i !== raceIndex
+          ? r
+          : { ...r, candidates: [...r.candidates, { name: '', bio: '' }] }
+      )
+    )
+  }
+
+  function removeCandidate(raceIndex: number, candidateIndex: number) {
+    setRaceInputs((prev) =>
+      prev.map((r, i) =>
+        i !== raceIndex
+          ? r
+          : { ...r, candidates: r.candidates.filter((_, ci) => ci !== candidateIndex) }
+      )
+    )
+  }
+
+  function addRace() {
+    setRaceInputs((prev) => [...prev, { title: '', candidateNamesText: '' }])
+  }
+
+  function removeRace(index: number) {
+    setRaceInputs((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function handleCreateEvent() {
     setLoading(true)
     setMessage('')
-    const candidateNames = candidateNamesText
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
+
+    const races = raceInputs.map((r) => ({
+      title: r.title,
+      candidates: r.candidates
+        .filter((c) => c.name.trim().length > 0)
+        .map((c) => ({ name: c.name.trim(), bio: c.bio.trim() })),
+    }))
 
     const res = await fetch('/api/admin/create-election', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ title, candidateNames }),
+      body: JSON.stringify({ title, races }),
     })
     const data = await res.json()
     setLoading(false)
 
     if (!res.ok) {
-      setMessage(data.error || '選挙の作成に失敗しました')
+      setMessage(data.error || 'イベントの作成に失敗しました')
       return
     }
-    setElectionId(data.electionId)
-    setMessage(`選挙を作成しました(ID: ${data.electionId})`)
+    setEventId(data.eventId)
+    setMessage(`イベントを作成しました(ID: ${data.eventId})`)
   }
 
   async function handleGenerateTokens() {
     setLoading(true)
     setMessage('')
+
+    const names = voterNamesText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+
     const res = await fetch('/api/admin/generate-tokens', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ electionId, count: tokenCount }),
+      body: JSON.stringify({ eventId, names }),
     })
     const data = await res.json()
     setLoading(false)
@@ -62,7 +134,7 @@ export default function AdminPage() {
       setMessage(data.error || 'トークン発行に失敗しました')
       return
     }
-    setTokens(data.tokens)
+    setIssued(data.issued)
   }
 
   async function handleClose() {
@@ -71,7 +143,7 @@ export default function AdminPage() {
     const res = await fetch('/api/admin/close', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ electionId }),
+      body: JSON.stringify({ eventId }),
     })
     const data = await res.json()
     setLoading(false)
@@ -86,7 +158,7 @@ export default function AdminPage() {
   async function handleViewResults() {
     setLoading(true)
     setMessage('')
-    const res = await fetch(`/api/results?electionId=${electionId}`)
+    const res = await fetch(`/api/results?eventId=${eventId}`)
     const data = await res.json()
     setLoading(false)
 
@@ -94,7 +166,7 @@ export default function AdminPage() {
       setMessage(data.error || '結果の取得に失敗しました')
       return
     }
-    setResults(data.results)
+    setResults(data)
   }
 
   const inputStyle = {
@@ -108,7 +180,7 @@ export default function AdminPage() {
   }
 
   return (
-    <main style={{ maxWidth: 560, margin: '40px auto', padding: 24 }}>
+    <main style={{ maxWidth: 640, margin: '40px auto', padding: 24 }}>
       <h1>管理者画面</h1>
 
       <label>
@@ -123,9 +195,9 @@ export default function AdminPage() {
 
       <hr style={{ margin: '24px 0' }} />
 
-      <h2>1. 選挙を作成する</h2>
+      <h2>1. イベントを作成する</h2>
       <label>
-        選挙タイトル
+        イベントタイトル(例:2026年度幹部選挙)
         <input
           type="text"
           value={title}
@@ -133,37 +205,89 @@ export default function AdminPage() {
           style={inputStyle}
         />
       </label>
-      <label>
-        候補者名(1行に1人ずつ)
-        <textarea
-          value={candidateNamesText}
-          onChange={(e) => setCandidateNamesText(e.target.value)}
-          rows={4}
-          style={inputStyle}
-        />
-      </label>
-      <button onClick={handleCreateElection} disabled={loading}>
-        選挙を作成
+
+      {raceInputs.map((race, i) => (
+        <div key={i} style={{ border: '1px solid #ddd', padding: 12, marginBottom: 12 }}>
+          <label>
+            選挙{i + 1}のタイトル(例:会長選挙)
+            <input
+              type="text"
+              value={race.title}
+              onChange={(e) => updateRace(i, 'title', e.target.value)}
+              style={inputStyle}
+            />
+          </label>
+                    <p style={{ marginBottom: 8 }}>候補者</p>
+          {race.candidates.map((candidate, ci) => (
+            <div
+              key={ci}
+              style={{ border: '1px solid #eee', padding: 8, marginBottom: 8 }}
+            >
+              <label>
+                氏名
+                <input
+                  type="text"
+                  value={candidate.name}
+                  onChange={(e) => updateCandidate(i, ci, 'name', e.target.value)}
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                紹介文(任意)
+                <textarea
+                  value={candidate.bio}
+                  onChange={(e) => updateCandidate(i, ci, 'bio', e.target.value)}
+                  rows={2}
+                  style={inputStyle}
+                />
+              </label>
+              {race.candidates.length > 1 && (
+                <button onClick={() => removeCandidate(i, ci)} type="button">
+                  この候補者を削除
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            onClick={() => addCandidate(i)}
+            type="button"
+            style={{ marginBottom: 12 }}
+          >
+            候補者を追加
+          </button>
+          {raceInputs.length > 1 && (
+            <button onClick={() => removeRace(i)} type="button">
+              この選挙を削除
+            </button>
+          )}
+        </div>
+      ))}
+      <button onClick={addRace} type="button" style={{ marginBottom: 16 }}>
+        選挙を追加
+      </button>
+      <br />
+      <button onClick={handleCreateEvent} disabled={loading}>
+        イベントを作成
       </button>
 
       <hr style={{ margin: '24px 0' }} />
 
-      <h2>2. トークンを発行する</h2>
+      <h2>2. 投票者にトークンを発行する</h2>
       <label>
-        選挙ID
+        イベントID
         <input
           type="text"
-          value={electionId}
-          onChange={(e) => setElectionId(e.target.value)}
+          value={eventId}
+          onChange={(e) => setEventId(e.target.value)}
           style={inputStyle}
         />
       </label>
       <label>
-        発行する人数
-        <input
-          type="number"
-          value={tokenCount}
-          onChange={(e) => setTokenCount(Number(e.target.value))}
+        投票者名簿(1行に1人ずつ)
+        <textarea
+          value={voterNamesText}
+          onChange={(e) => setVoterNamesText(e.target.value)}
+          rows={4}
           style={inputStyle}
         />
       </label>
@@ -171,13 +295,14 @@ export default function AdminPage() {
         トークンを発行
       </button>
 
-      {tokens.length > 0 && (
+      {issued.length > 0 && (
         <div style={{ marginTop: 16, background: '#f5f5f5', padding: 12 }}>
-          <p>発行されたトークン(それぞれ1人に配布してください):</p>
+          <p>発行されたトークン(該当者にそれぞれ配布してください):</p>
           <ul>
-            {tokens.map((t) => (
-              <li key={t} style={{ fontFamily: 'monospace' }}>
-                {t}
+            {issued.map((item) => (
+              <li key={item.token}>
+                {item.name}:{' '}
+                <span style={{ fontFamily: 'monospace' }}>{item.token}</span>
               </li>
             ))}
           </ul>
@@ -196,14 +321,19 @@ export default function AdminPage() {
 
       {results && (
         <div style={{ marginTop: 16, background: '#f5f5f5', padding: 12 }}>
-          <p>結果:</p>
-          <ul>
-            {results.map((r) => (
-              <li key={r.candidateId}>
-                {r.name}: {r.count}票
-              </li>
-            ))}
-          </ul>
+          <p>{results.eventTitle} の結果:</p>
+          {results.races.map((race) => (
+            <div key={race.raceId} style={{ marginBottom: 12 }}>
+              <strong>{race.raceTitle}</strong>
+              <ul>
+                {race.candidates.map((c) => (
+                  <li key={c.candidateId}>
+                    {c.name}: {c.count}票
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
 

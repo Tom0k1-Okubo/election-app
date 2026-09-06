@@ -3,30 +3,31 @@ import { randomBytes, createHash } from 'crypto'
 import { NextResponse } from 'next/server'
 import { checkAdminPassword } from '@/lib/adminAuth'
 
-// トークンをランダム生成し、ハッシュ化してDBに保存、
-// 生のトークンだけを配布用としてレスポンスで返す
 export async function POST(request: Request) {
-    const authError = checkAdminPassword(request)
+  const authError = checkAdminPassword(request)
   if (authError) return authError
 
-  const { electionId, count } = await request.json()
+  const { eventId, names } = (await request.json()) as {
+    eventId: string
+    names: string[]
+  }
 
-  if (!electionId || !count) {
+  if (!eventId || !Array.isArray(names) || names.length === 0) {
     return NextResponse.json(
-      { error: 'electionIdとcountを指定してください' },
+      { error: 'eventIdと1名以上のnamesを指定してください' },
       { status: 400 }
     )
   }
 
   const supabase = createServerClient()
-  const tokens: string[] = []
-  const rows: { election_id: string; token_hash: string }[] = []
+  const issued: { name: string; token: string }[] = []
+  const rows: { event_id: string; name: string; token_hash: string }[] = []
 
-  for (let i = 0; i < count; i++) {
-    const rawToken = randomBytes(16).toString('hex') // 配布用の生トークン
+  for (const name of names) {
+    const rawToken = randomBytes(16).toString('hex')
     const tokenHash = createHash('sha256').update(rawToken).digest('hex')
-    tokens.push(rawToken)
-    rows.push({ election_id: electionId, token_hash: tokenHash })
+    issued.push({ name, token: rawToken })
+    rows.push({ event_id: eventId, name, token_hash: tokenHash })
   }
 
   const { error } = await supabase.from('voters').insert(rows)
@@ -35,7 +36,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // 生トークンはこのレスポンス以外どこにも保存されないので、
-  // ここで管理者が控えて各投票者に配布する
-  return NextResponse.json({ tokens })
+  return NextResponse.json({ issued })
 }

@@ -3,11 +3,11 @@ import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const electionId = searchParams.get('electionId')
+  const eventId = searchParams.get('eventId')
 
-  if (!electionId) {
+  if (!eventId) {
     return NextResponse.json(
-      { error: 'electionIdを指定してください' },
+      { error: 'eventIdを指定してください' },
       { status: 400 }
     )
   }
@@ -15,48 +15,63 @@ export async function GET(request: Request) {
   const supabase = createServerClient()
 
   // 締切前は、管理者を含め誰であっても結果を返さない
-  const { data: election, error: electionError } = await supabase
-    .from('elections')
-    .select('status')
-    .eq('id', electionId)
+  const { data: event, error: eventError } = await supabase
+    .from('events')
+    .select('title, status')
+    .eq('id', eventId)
     .single()
 
-  if (electionError || !election) {
+  if (eventError || !event) {
     return NextResponse.json(
-      { error: '選挙が見つかりません' },
+      { error: 'イベントが見つかりません' },
       { status: 404 }
     )
   }
 
-  if (election.status !== 'closed') {
+  if (event.status !== 'closed') {
     return NextResponse.json(
       { error: '投票期間中は結果を確認できません' },
       { status: 403 }
     )
   }
 
-  const { data: candidates, error: candidatesError } = await supabase
-    .from('candidates')
-    .select('id, name')
-    .eq('election_id', electionId)
+  const { data: races, error: racesError } = await supabase
+    .from('races')
+    .select('id, title, candidates(id, name, bio)')
+    .eq('event_id', eventId)
 
-  const { data: votes, error: votesError } = await supabase
-    .from('votes')
-    .select('candidate_id')
-    .eq('election_id', electionId)
-
-  if (candidatesError || votesError) {
+  if (racesError || !races) {
     return NextResponse.json(
-      { error: '集計中にエラーが発生しました' },
+      { error: racesError?.message || '選挙情報の取得に失敗しました' },
       { status: 500 }
     )
   }
 
-  const results = candidates!.map((c) => ({
-    candidateId: c.id,
-    name: c.name,
-    count: votes!.filter((v) => v.candidate_id === c.id).length,
-  }))
+  const raceResults = []
 
-  return NextResponse.json({ results })
+  for (const race of races) {
+    const { data: votes, error: votesError } = await supabase
+      .from('votes')
+      .select('candidate_id')
+      .eq('race_id', race.id)
+
+    if (votesError) {
+      return NextResponse.json({ error: votesError.message }, { status: 500 })
+    }
+
+    const candidateResults = race.candidates.map((c: { id: string; name: string }) => ({
+      candidateId: c.id,
+      name: c.name,
+      count: votes.filter((v) => v.candidate_id === c.id).length,
+    }))
+
+    raceResults.push({
+      raceId: race.id,
+      raceTitle: race.title,
+      candidates: candidateResults,
+      blankCount: votes.length === 0 ? 0 : undefined, // 参考値。空欄票数は下で計算
+    })
+  }
+
+  return NextResponse.json({ eventTitle: event.title, races: raceResults })
 }

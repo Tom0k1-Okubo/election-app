@@ -6,11 +6,11 @@ export async function POST(request: Request) {
   const authError = checkAdminPassword(request)
   if (authError) return authError
 
-  const { electionId } = await request.json()
+  const { eventId } = await request.json()
 
-  if (!electionId) {
+  if (!eventId) {
     return NextResponse.json(
-      { error: 'electionIdを指定してください' },
+      { error: 'eventIdを指定してください' },
       { status: 400 }
     )
   }
@@ -18,9 +18,9 @@ export async function POST(request: Request) {
   const supabase = createServerClient()
 
   const { error } = await supabase
-    .from('elections')
+    .from('events')
     .update({ status: 'closed', closed_at: new Date().toISOString() })
-    .eq('id', electionId)
+    .eq('id', eventId)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

@@ -2,12 +2,18 @@ import { createServerClient } from '@/lib/supabase'
 import { createHash } from 'crypto'
 import { NextResponse } from 'next/server'
 
-export async function POST(request: Request) {
-  const { token, candidateId } = await request.json()
+type Selection = { raceId: string; candidateId: string | null }
 
-  if (!token || !candidateId) {
+export async function POST(request: Request) {
+  const { name, token, selections } = (await request.json()) as {
+    name: string
+    token: string
+    selections: Selection[]
+  }
+
+  if (!name || !token || !Array.isArray(selections)) {
     return NextResponse.json(
-      { error: 'tokenとcandidateIdを指定してください' },
+      { error: '必要な情報が不足しています' },
       { status: 400 }
     )
   }
@@ -15,16 +21,16 @@ export async function POST(request: Request) {
   const supabase = createServerClient()
   const tokenHash = createHash('sha256').update(token).digest('hex')
 
-  // トークンが存在し、まだ使われていないか確認
-  const { data: voter, error: findError } = await supabase
+  // 投票確定の直前に、もう一度名前とトークンを検証する
+  const { data: voter, error } = await supabase
     .from('voters')
-    .select('id, election_id, used')
+    .select('id, name, used')
     .eq('token_hash', tokenHash)
     .single()
 
-  if (findError || !voter) {
+  if (error || !voter || voter.name.trim() !== name.trim()) {
     return NextResponse.json(
-      { error: '無効なトークンです' },
+      { error: '名前またはトークンが正しくありません' },
       { status: 401 }
     )
   }
@@ -36,12 +42,14 @@ export async function POST(request: Request) {
     )
   }
 
-  // 投票の記録とトークンの使用済み化は、途中で失敗しても
-  // 不整合が起きないよう1つのDB関数(トランザクション)にまとめて実行する
-  const { error: rpcError } = await supabase.rpc('cast_vote', {
+  const payload = selections.map((s) => ({
+    race_id: s.raceId,
+    candidate_id: s.candidateId,
+  }))
+
+  const { error: rpcError } = await supabase.rpc('cast_votes', {
     p_voter_id: voter.id,
-    p_election_id: voter.election_id,
-    p_candidate_id: candidateId,
+    p_selections: payload,
   })
 
   if (rpcError) {
